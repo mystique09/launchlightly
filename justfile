@@ -22,6 +22,7 @@ test:
 
 release:
     cargo b --release
+    topcoat asset bundle --bin launchlight-server --release
 
 db-up:
     docker compose up -d postgres
@@ -36,6 +37,7 @@ db-seed:
     cargo run -p launchlightly-infra-postgresql --bin seed
 
 run:
+    topcoat asset bundle --bin launchlight-server
     cargo run -p launchlight-server
 
 dev:
