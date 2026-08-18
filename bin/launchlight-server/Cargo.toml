@@ -11,3 +11,6 @@ launchlightly-infra-postgresql = { path = "../../crates/infra-postgresql" }
 launchlightly-web = { path = "../../crates/web" }
 tokio.workspace = true
 topcoat.workspace = true
+tracing.workspace = true
+tracing-log.workspace = true
+tracing-subscriber.workspace = true
