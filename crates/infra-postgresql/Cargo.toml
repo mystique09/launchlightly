@@ -1,0 +1,15 @@
+[package]
+name = "launchlightly-infra-postgresql"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+better-auth.workspace = true
+color-eyre.workspace = true
+eyre.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+validator.workspace = true
