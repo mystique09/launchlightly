@@ -3,6 +3,7 @@ use launchlightly_infra_postgresql::{connect_pool, migrate};
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     color_eyre::install()?;
+    dotenvy::dotenv().ok();
 
     let database_url = required_env("DATABASE_URL")?;
     let pool = connect_pool(&database_url).await?;

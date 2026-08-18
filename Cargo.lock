@@ -1693,6 +1693,7 @@ name = "launchlight-server"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
+ "dotenvy",
  "eyre",
  "launchlightly-infra-postgresql",
  "launchlightly-web",
@@ -1714,6 +1715,7 @@ version = "0.1.0"
 dependencies = [
  "better-auth",
  "color-eyre",
+ "dotenvy",
  "eyre",
  "serde_json",
  "sqlx",

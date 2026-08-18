@@ -3,6 +3,7 @@ use launchlightly_infra_postgresql::{SuperAdminSeed, connect_pool, migrate, seed
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     color_eyre::install()?;
+    dotenvy::dotenv().ok();
 
     let database_url = required_env("DATABASE_URL")?;
     let email = required_env("LAUNCHLIGHTLY_SUPER_ADMIN_EMAIL")?;

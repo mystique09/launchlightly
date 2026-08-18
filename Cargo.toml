@@ -3,6 +3,7 @@ members = ["crates/*", "bin/*"]
 resolver = "3"
 
 [workspace.dependencies]
+dotenvy = "0.15.7"
 eyre = "0.6.12"
 color-eyre = "0.6.5"
 tracing = "0.1.44"

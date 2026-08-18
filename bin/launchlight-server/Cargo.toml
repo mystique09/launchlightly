@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 color-eyre.workspace = true
+dotenvy.workspace = true
 eyre.workspace = true
 launchlightly-infra-postgresql = { path = "../../crates/infra-postgresql" }
 launchlightly-web = { path = "../../crates/web" }

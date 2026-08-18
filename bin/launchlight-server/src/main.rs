@@ -7,6 +7,7 @@ use launchlightly_web::WebConfig;
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
+    dotenvy::dotenv().ok();
 
     let database_url = required_env("DATABASE_URL")?;
     let secret = required_env("BETTER_AUTH_SECRET")?;
