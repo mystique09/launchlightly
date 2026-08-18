@@ -13,6 +13,8 @@ pub(crate) async fn app_layout(cx: &Cx, slot: Result) -> Result {
     let title = match uri(cx).path() {
         "/sign-in" => "Sign in · LaunchLightly",
         "/sign-up" => "Create account · LaunchLightly",
+        "/forgot-password" => "Forgot password · LaunchLightly",
+        "/reset-password" => "Reset password · LaunchLightly",
         "/account/security" => "Account security · LaunchLightly",
         _ => "LaunchLightly",
     };
@@ -24,6 +26,7 @@ pub(crate) async fn app_layout(cx: &Cx, slot: Result) -> Result {
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <meta name="color-scheme" content="light">
+                <meta name="referrer" content="no-referrer">
                 <title>(title)</title>
                 <link
                     rel="icon"

@@ -89,6 +89,39 @@
         );
     }
 
+    function setPasswordVisibility(toggle, input, visible) {
+        input.type = visible ? "text" : "password";
+        toggle.setAttribute("aria-pressed", String(visible));
+        toggle.setAttribute("aria-label", visible ? "Hide password" : "Show password");
+        toggle.querySelector("[data-password-visible-icon]").hidden = visible;
+        toggle.querySelector("[data-password-hidden-icon]").hidden = !visible;
+    }
+
+    function concealPasswords(scope) {
+        for (const toggle of scope.querySelectorAll("[data-password-toggle]")) {
+            const input = document.getElementById(toggle.dataset.passwordToggle);
+            if (input instanceof HTMLInputElement) {
+                setPasswordVisibility(toggle, input, false);
+            }
+        }
+    }
+
+    function bindPasswordVisibility() {
+        const forms = new Set();
+        for (const toggle of document.querySelectorAll("[data-password-toggle]")) {
+            const input = document.getElementById(toggle.dataset.passwordToggle);
+            if (!(input instanceof HTMLInputElement)) continue;
+
+            toggle.addEventListener("click", () => {
+                setPasswordVisibility(toggle, input, input.type === "password");
+            });
+            if (toggle.form) forms.add(toggle.form);
+        }
+        for (const form of forms) {
+            form.addEventListener("reset", () => concealPasswords(form));
+        }
+    }
+
     function isInvalidCredentials(error) {
         return error instanceof AuthRequestError
             && error.status === 401
@@ -99,6 +132,11 @@
         const form = document.querySelector("#sign-in-form");
         if (!form) return;
         const status = document.querySelector("#sign-in-status");
+
+        if (new URLSearchParams(window.location.search).get("reset") === "success") {
+            showStatus(status, "Your password has been reset. Sign in with your new password.", "success", false);
+            window.history.replaceState(null, "", "/sign-in");
+        }
 
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
@@ -117,12 +155,104 @@
                 window.location.assign("/account/security");
             } catch (error) {
                 form.elements.password.value = "";
+                concealPasswords(form);
                 if (error instanceof AuthRequestError && error.status === 401) {
                     showStatus(status, "Email or password is incorrect. Check both fields and try again.");
                 } else if (error instanceof AuthRequestError && error.status === 429) {
                     showStatus(status, "Too many sign-in attempts. Wait a moment, then try again.");
                 } else {
                     showStatus(status, "Sign in is temporarily unavailable. Check your connection and try again.");
+                }
+            } finally {
+                setBusy(form, false);
+            }
+        });
+    }
+
+    function bindForgotPassword() {
+        const form = document.querySelector("#forgot-password-form");
+        if (!form) return;
+        const status = document.querySelector("#forgot-password-status");
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            clearStatus(status);
+            if (!form.reportValidity()) return;
+
+            setBusy(form, true);
+            try {
+                await api("/forget-password", {
+                    method: "POST",
+                    body: {
+                        email: form.elements.email.value.trim().toLowerCase(),
+                        redirectTo: `${window.location.origin}/reset-password`,
+                    },
+                });
+                form.reset();
+                showStatus(
+                    status,
+                    "If an account exists for that email, a reset link is ready. During local development, find it in the server output.",
+                    "success",
+                    false,
+                );
+            } catch (error) {
+                if (error instanceof AuthRequestError && error.status === 429) {
+                    showStatus(status, "Too many reset requests. Wait a moment, then try again.");
+                } else {
+                    showStatus(status, "Password recovery is temporarily unavailable. Try again.");
+                }
+            } finally {
+                setBusy(form, false);
+            }
+        });
+    }
+
+    function bindResetPassword() {
+        const form = document.querySelector("#reset-password-form");
+        if (!form) return;
+        const status = document.querySelector("#reset-password-status");
+        const password = form.elements["reset-password"];
+        const confirmation = form.elements["confirm-reset-password"];
+        const token = new URLSearchParams(window.location.search).get("token");
+
+        if (!token) {
+            for (const control of form.querySelectorAll("input, button")) {
+                control.disabled = true;
+            }
+            showStatus(status, "This reset link is invalid or expired. Request a new one.");
+            return;
+        }
+        window.history.replaceState(null, "", "/reset-password");
+
+        const validate = () => {
+            validatePasswordLength(password);
+            validateMatchingPasswords(password, confirmation, "Passwords do not match.");
+        };
+        password.addEventListener("input", validate);
+        confirmation.addEventListener("input", validate);
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            clearStatus(status);
+            validate();
+            if (!form.reportValidity()) return;
+
+            setBusy(form, true);
+            try {
+                await api("/reset-password", {
+                    method: "POST",
+                    body: { newPassword: password.value, token },
+                });
+                form.reset();
+                window.location.replace("/sign-in?reset=success");
+            } catch (error) {
+                password.value = "";
+                confirmation.value = "";
+                concealPasswords(form);
+                if (error instanceof AuthRequestError && error.status === 400) {
+                    showStatus(status, "This reset link is invalid or expired. Request a new one.");
+                } else {
+                    showStatus(status, "Your password could not be reset. Try again.");
                 }
             } finally {
                 setBusy(form, false);
@@ -164,6 +294,7 @@
             } catch (_error) {
                 password.value = "";
                 confirmation.value = "";
+                concealPasswords(form);
                 showStatus(
                     status,
                     "We could not create that account. Check the details or sign in if the email is already registered.",
@@ -338,6 +469,7 @@
                 passwordForm.elements["current-password"].value = "";
                 newPassword.value = "";
                 confirmation.value = "";
+                concealPasswords(passwordForm);
                 if (isInvalidCredentials(error)) {
                     showStatus(passwordStatus, "Your current password is incorrect. Try again.");
                 } else {
@@ -402,8 +534,11 @@
     }
 
     bindSessionGate();
+    bindPasswordVisibility();
     bindSignIn();
     bindSignUp();
+    bindForgotPassword();
+    bindResetPassword();
     bindSignOut();
     void bindAccountPage();
 })();

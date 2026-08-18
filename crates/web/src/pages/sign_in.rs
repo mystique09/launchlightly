@@ -32,6 +32,11 @@ pub(crate) async fn sign_in_page() -> Result {
                         "Your password",
                     ).min_length(8),
                 )
+                <div class="-mt-2 text-right text-sm">
+                    <a class="font-medium text-foreground underline underline-offset-4" href="/forgot-password">
+                        "Forgot password?"
+                    </a>
+                </div>
                 form_status(id: "sign-in-status")
                 submit_button(label: "Sign in", pending_label: "Signing in…")
             </form>

@@ -8,7 +8,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use better_auth::{
-    AuthConfig, AuthSession, AuthUser, BetterAuth, CurrentSession, SessionOps,
+    AuthConfig, AuthSession, AuthUser, BetterAuth, ConsoleEmailProvider, CurrentSession,
+    SessionOps,
     adapters::SqlxAdapter,
     handlers::AxumIntegration,
     plugins::{
@@ -59,8 +60,10 @@ async fn health() -> topcoat::Result<StatusCode> {
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn enforce_change_password_limit(request: Request, next: Next) -> Response {
-    if request.method() != Method::POST || request.uri().path() != "/api/auth/change-password" {
+async fn enforce_password_limit(request: Request, next: Next) -> Response {
+    const PASSWORD_PATHS: [&str; 2] = ["/api/auth/change-password", "/api/auth/reset-password"];
+
+    if request.method() != Method::POST || !PASSWORD_PATHS.contains(&request.uri().path()) {
         return next.run(request).await;
     }
 
@@ -88,9 +91,10 @@ async fn enforce_change_password_limit(request: Request, next: Next) -> Response
 }
 
 async fn canonicalize_email(request: Request, next: Next) -> Response {
-    const EMAIL_PATHS: [&str; 3] = [
+    const EMAIL_PATHS: [&str; 4] = [
         "/api/auth/sign-up/email",
         "/api/auth/sign-in/email",
+        "/api/auth/forget-password",
         "/api/auth/admin/create-user",
     ];
 
@@ -196,9 +200,6 @@ async fn router_with_assets(
         .disabled_path("/change-email")
         .disabled_path("/delete-user")
         .disabled_path("/delete-user/callback")
-        .disabled_path("/forget-password")
-        .disabled_path("/reset-password")
-        .disabled_path("/reset-password/{token}")
         .disabled_path("/set-password");
     if public_url.scheme() == "http" && is_loopback {
         let port = public_url
@@ -212,6 +213,7 @@ async fn router_with_assets(
     let auth = Arc::new(
         BetterAuth::<SqlxAdapter>::new(auth_config)
             .database(adapter)
+            .email_provider(ConsoleEmailProvider)
             .plugin(EmailPasswordPlugin::new().enable_signup(true))
             .plugin(SessionManagementPlugin::new())
             .plugin(PasswordManagementPlugin::new().require_current_password(true))
@@ -237,7 +239,7 @@ async fn router_with_assets(
         .nest("/api/auth", auth_child)
         .with_state(auth)
         .layer(axum::middleware::from_fn(canonicalize_email))
-        .layer(axum::middleware::from_fn(enforce_change_password_limit));
+        .layer(axum::middleware::from_fn(enforce_password_limit));
 
     Ok(Router::builder()
         .assets(assets)

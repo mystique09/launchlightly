@@ -120,6 +120,7 @@ async fn sign_in_page_exposes_the_email_password_flow() {
     assert!(html.contains("id=\"sign-in-form\""));
     assert!(html.contains("autocomplete=\"email\""));
     assert!(html.contains("autocomplete=\"current-password\""));
+    assert!(html.contains("href=\"/forgot-password\""));
     assert!(html.contains("href=\"/sign-up\""));
 }
 
@@ -141,6 +142,71 @@ async fn sign_up_page_exposes_the_supported_registration_fields() {
     assert!(html.contains("minlength=\"8\""));
     assert!(html.contains("maxlength=\"128\""));
     assert!(html.contains("href=\"/sign-in\""));
+}
+
+#[tokio::test]
+async fn forgot_password_page_exposes_email_recovery_flow() {
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://unused:unused@localhost/unused")
+        .expect("lazy pool");
+    let app = router(pool, test_config()).await.expect("build router");
+
+    let (status, html) = get_html(&app, "/forgot-password").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("<title>Forgot password · LaunchLightly</title>"));
+    assert!(html.contains("Reset your password</h1>"));
+    assert!(html.contains("id=\"forgot-password-form\""));
+    assert!(html.contains("autocomplete=\"email\""));
+    assert!(html.contains("href=\"/sign-in\""));
+}
+
+#[tokio::test]
+async fn reset_password_page_exposes_new_password_flow() {
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://unused:unused@localhost/unused")
+        .expect("lazy pool");
+    let app = router(pool, test_config()).await.expect("build router");
+
+    let (status, html) = get_html(&app, "/reset-password?token=reset_example").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("<title>Reset password · LaunchLightly</title>"));
+    assert!(html.contains("<meta name=\"referrer\" content=\"no-referrer\">"));
+    assert!(html.contains("Choose a new password</h1>"));
+    assert!(html.contains("id=\"reset-password-form\""));
+    assert!(html.contains("id=\"reset-username\""));
+    assert!(html.contains("autocomplete=\"username\""));
+    assert!(html.contains("id=\"reset-password\""));
+    assert!(html.contains("id=\"confirm-reset-password\""));
+    assert!(html.contains("autocomplete=\"new-password\""));
+    assert!(html.contains("href=\"/forgot-password\""));
+}
+
+#[tokio::test]
+async fn every_password_field_has_a_visibility_control() {
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://unused:unused@localhost/unused")
+        .expect("lazy pool");
+    let app = router(pool, test_config()).await.expect("build router");
+
+    for path in [
+        "/sign-in",
+        "/sign-up",
+        "/reset-password",
+        "/account/security",
+    ] {
+        let (status, html) = get_html(&app, path).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            html.matches("type=\"password\"").count(),
+            html.matches("data-password-toggle=").count(),
+            "each password field on {path} must have one visibility control"
+        );
+        assert!(html.contains("aria-label=\"Show password\""));
+        assert!(html.contains("data-password-visible-icon"));
+        assert!(html.contains("data-password-hidden-icon"));
+    }
 }
 
 #[tokio::test]
@@ -182,7 +248,7 @@ async fn auth_ui_does_not_offer_unconfigured_authentication_methods() {
     assert_eq!(sign_up_status, StatusCode::OK);
     let entry_pages = format!("{sign_in}{sign_up}").to_ascii_lowercase();
 
-    for unsupported in ["google", "github", "magic link", "forgot password"] {
+    for unsupported in ["google", "github", "magic link"] {
         assert!(
             !entry_pages.contains(unsupported),
             "unconfigured auth method must not be rendered: {unsupported}"
@@ -219,16 +285,15 @@ async fn unsupported_authentication_api_routes_are_not_mounted() {
 }
 
 #[tokio::test]
-async fn password_recovery_routes_are_not_mounted_without_delivery() {
+async fn password_recovery_routes_are_mounted() {
     let pool = PgPoolOptions::new()
-        .connect_lazy("postgres://unused:unused@localhost/unused")
+        .connect_lazy("postgres://unused:unused@127.0.0.1:1/unused")
         .expect("lazy pool");
     let app = router(pool, test_config()).await.expect("build router");
 
     for (method, path) in [
         (Method::POST, "/api/auth/forget-password"),
         (Method::POST, "/api/auth/reset-password"),
-        (Method::GET, "/api/auth/reset-password/token"),
     ] {
         let request = Request::builder()
             .method(method)
@@ -239,12 +304,12 @@ async fn password_recovery_routes_are_not_mounted_without_delivery() {
             .body(Body::from("{}"))
             .expect("password recovery request");
 
-        assert_eq!(app.handle(request).await.status(), StatusCode::NOT_FOUND);
+        assert_ne!(app.handle(request).await.status(), StatusCode::NOT_FOUND);
     }
 }
 
 #[tokio::test]
-async fn change_password_enforces_the_signup_password_byte_limit() {
+async fn password_mutations_enforce_the_signup_password_byte_limit() {
     let pool = PgPoolOptions::new()
         .connect_lazy("postgres://unused:unused@localhost/unused")
         .expect("lazy pool");
@@ -253,25 +318,31 @@ async fn change_password_enforces_the_signup_password_byte_limit() {
     assert!(password.chars().count() <= 128);
     assert!(password.len() > 128);
 
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/api/auth/change-password")
-        .header("content-type", "application/json")
-        .header("origin", "http://localhost:3000")
-        .header("host", "localhost:3000")
-        .body(Body::from(
+    for (path, body) in [
+        (
+            "/api/auth/change-password",
             json!({
                 "currentPassword": "correct-horse-battery-staple",
                 "newPassword": password,
                 "revokeOtherSessions": true
-            })
-            .to_string(),
-        ))
-        .expect("change-password request");
+            }),
+        ),
+        (
+            "/api/auth/reset-password",
+            json!({ "newPassword": password, "token": "reset_example" }),
+        ),
+    ] {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(path)
+            .header("content-type", "application/json")
+            .header("origin", "http://localhost:3000")
+            .header("host", "localhost:3000")
+            .body(Body::from(body.to_string()))
+            .expect("password mutation request");
 
-    let response = app.handle(request).await;
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(app.handle(request).await.status(), StatusCode::BAD_REQUEST);
+    }
 }
 
 #[tokio::test]
@@ -545,4 +616,117 @@ async fn auth_routes_mount_and_seeded_password_signs_in(pool: PgPool) {
             .iter()
             .all(|session| session["id"] != "expired-test-session")
     );
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL"]
+async fn delivered_reset_token_replaces_the_password_and_revokes_sessions(pool: PgPool) {
+    migrate(&pool).await.expect("migrate");
+    let seed = SuperAdminSeed::new(
+        "owner@example.com",
+        "correct-horse-battery-staple",
+        Some("LaunchLightly Owner".to_owned()),
+    )
+    .expect("valid seed");
+    seed_super_admin(&pool, &seed).await.expect("seed");
+    let app = router(pool.clone(), test_config())
+        .await
+        .expect("build router");
+
+    let sign_in = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/sign-in/email")
+        .header("content-type", "application/json")
+        .header("origin", "http://localhost:3000")
+        .header("host", "localhost:3000")
+        .body(Body::from(
+            json!({
+                "email": "owner@example.com",
+                "password": "correct-horse-battery-staple"
+            })
+            .to_string(),
+        ))
+        .expect("initial sign-in request");
+    let response = app.handle(sign_in).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let old_cookie = response
+        .headers()
+        .get("set-cookie")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .expect("initial session cookie")
+        .to_owned();
+
+    let forgot_password = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/forget-password")
+        .header("content-type", "application/json")
+        .header("origin", "http://localhost:3000")
+        .header("host", "localhost:3000")
+        .body(Body::from(
+            json!({
+                "email": "Owner@Example.COM",
+                "redirectTo": "http://localhost:3000/reset-password"
+            })
+            .to_string(),
+        ))
+        .expect("forgot-password request");
+    let response = app.handle(forgot_password).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read forgot-password response");
+    let payload: Value = serde_json::from_slice(&body).expect("valid forgot-password JSON");
+    assert_eq!(payload["status"], true);
+
+    let token: String = sqlx::query_scalar(
+        "SELECT value FROM verifications WHERE identifier = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind("owner@example.com")
+    .fetch_one(&pool)
+    .await
+    .expect("delivered reset token");
+    assert!(token.starts_with("reset_"));
+
+    let new_password = "new-correct-horse-battery-staple";
+    let reset_password = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/reset-password")
+        .header("content-type", "application/json")
+        .header("origin", "http://localhost:3000")
+        .header("host", "localhost:3000")
+        .body(Body::from(
+            json!({ "newPassword": new_password, "token": token }).to_string(),
+        ))
+        .expect("reset-password request");
+    let response = app.handle(reset_password).await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let stale_session = Request::builder()
+        .method(Method::GET)
+        .uri("/api/auth/get-session")
+        .header("cookie", old_cookie)
+        .body(Body::empty())
+        .expect("stale-session request");
+    assert_eq!(
+        app.handle(stale_session).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    for (password, expected_status) in [
+        ("correct-horse-battery-staple", StatusCode::UNAUTHORIZED),
+        (new_password, StatusCode::OK),
+    ] {
+        let sign_in = Request::builder()
+            .method(Method::POST)
+            .uri("/api/auth/sign-in/email")
+            .header("content-type", "application/json")
+            .header("origin", "http://localhost:3000")
+            .header("host", "localhost:3000")
+            .body(Body::from(
+                json!({ "email": "owner@example.com", "password": password }).to_string(),
+            ))
+            .expect("post-reset sign-in request");
+        assert_eq!(app.handle(sign_in).await.status(), expected_status);
+    }
 }

@@ -1,9 +1,14 @@
 use topcoat::{
     Result,
+    icon::{icon, iconify::iconify_icon},
     view::{attributes, component, view},
 };
 
-use super::{input::input, label::label};
+use super::{
+    button::{ButtonSize, ButtonVariant, button},
+    input::input,
+    label::label,
+};
 
 pub(crate) struct FieldSpec {
     id: &'static str,
@@ -57,26 +62,48 @@ pub(crate) async fn form_field(field: FieldSpec) -> Result {
                     <span id=(&hint_id) class="text-xs text-muted-foreground">(field.hint)</span>
                 }
             </div>
-            input(
-                attrs: attributes! {
-                    id=(field.id)
-                    name=(field.id)
-                    type=(field.input_type)
-                    autocomplete=(field.autocomplete)
-                    placeholder=(field.placeholder)
-                    required="required"
-                    class="h-11"
-                    if !field.hint.is_empty() {
-                        aria-describedby=(&hint_id)
-                    }
-                    if let Some(min_length) = field.min_length {
-                        minlength=(min_length)
-                    }
-                    if field.input_type == "password" {
-                        maxlength="128"
-                    }
-                },
-            )
+            <div class="relative">
+                input(
+                    attrs: attributes! {
+                        id=(field.id)
+                        name=(field.id)
+                        type=(field.input_type)
+                        autocomplete=(field.autocomplete)
+                        placeholder=(field.placeholder)
+                        required="required"
+                        class=(if field.input_type == "password" { "h-11 pr-12" } else { "h-11" })
+                        if !field.hint.is_empty() {
+                            aria-describedby=(&hint_id)
+                        }
+                        if let Some(min_length) = field.min_length {
+                            minlength=(min_length)
+                        }
+                        if field.input_type == "password" {
+                            maxlength="128"
+                        }
+                    },
+                )
+                if field.input_type == "password" {
+                    button(
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Icon,
+                        attrs: attributes! {
+                            type="button"
+                            class="absolute top-1 right-1"
+                            aria-label="Show password"
+                            aria-controls=(field.id)
+                            aria-pressed="false"
+                            data-password-toggle=(field.id)
+                        },
+                        <span data-password-visible-icon="true">
+                            icon(data: iconify_icon!("feather:eye"))
+                        </span>
+                        <span data-password-hidden-icon="true" hidden="hidden">
+                            icon(data: iconify_icon!("feather:eye-off"))
+                        </span>
+                    )
+                }
+            </div>
         </div>
     }
 }
