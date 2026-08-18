@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: launchlightly_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: launchlightly_db
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5438}:5432"
+    volumes:
+      - launchlightly-postgres:/var/lib/postgresql
+    networks:
+      - launchlightly-network
+
+networks:
+  launchlightly-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16
+          gateway: 172.29.0.1
+
+volumes:
+  launchlightly-postgres:

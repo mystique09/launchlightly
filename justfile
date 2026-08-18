@@ -1,5 +1,7 @@
 # https://just.systems
 
+set dotenv-load := true
+
 default:
     echo 'Hello, world!'
 
@@ -20,3 +22,21 @@ test:
 
 release:
     cargo b --release
+
+db-up:
+    docker compose up -d postgres
+
+db-down:
+    docker compose down
+
+db-migrate:
+    cargo run -p launchlightly-infra-postgresql --bin migrate
+
+db-seed:
+    cargo run -p launchlightly-infra-postgresql --bin seed
+
+run:
+    cargo run -p launchlight-server
+
+dev:
+    topcoat dev --bin launchlight-server
