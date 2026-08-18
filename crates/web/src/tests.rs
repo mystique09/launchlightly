@@ -1,9 +1,14 @@
 use launchlightly_infra_postgresql::{SuperAdminSeed, migrate, seed_super_admin};
-use launchlightly_web::{WebConfig, router};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use topcoat::router::{Body, Method, Router, StatusCode, request::Request, to_bytes};
+
+use super::{Error, WebConfig, router_with_assets};
+
+async fn router(pool: PgPool, config: WebConfig) -> Result<Router, Error> {
+    router_with_assets(pool, config, crate::assets::test_bundle()).await
+}
 
 fn test_config() -> WebConfig {
     WebConfig {
@@ -46,6 +51,60 @@ async fn health_is_served_by_topcoat() {
 }
 
 #[tokio::test]
+async fn auth_pages_load_topcoat_compiled_assets() {
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://unused:unused@localhost/unused")
+        .expect("lazy pool");
+    let app = router(pool, test_config()).await.expect("build router");
+
+    let (status, html) = get_html(&app, "/sign-in").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("href=\"/_topcoat/assets/app-test.css\""));
+    assert!(html.contains("src=\"/_topcoat/assets/auth-test.js\""));
+    assert!(!html.contains("<style>"));
+
+    for (path, expected_content_type, expected_body) in [
+        (
+            "/_topcoat/assets/app-test.css",
+            "text/css; charset=utf-8",
+            ".min-h-screen",
+        ),
+        (
+            "/_topcoat/assets/auth-test.js",
+            "text/javascript; charset=utf-8",
+            "bindSignIn",
+        ),
+    ] {
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(path)
+            .body(Body::empty())
+            .expect("asset request");
+        let response = app.handle(request).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok()),
+            Some(expected_content_type)
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("cache-control")
+                .and_then(|value| value.to_str().ok()),
+            Some("public, max-age=31536000, immutable")
+        );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read asset response");
+        let body = String::from_utf8(body.to_vec()).expect("asset response is UTF-8");
+        assert!(body.contains(expected_body));
+    }
+}
+
+#[tokio::test]
 async fn sign_in_page_exposes_the_email_password_flow() {
     let pool = PgPoolOptions::new()
         .connect_lazy("postgres://unused:unused@localhost/unused")
@@ -57,7 +116,7 @@ async fn sign_in_page_exposes_the_email_password_flow() {
     assert_eq!(status, StatusCode::OK);
     assert!(html.contains("rel=\"icon\""));
     assert!(html.contains("<title>Sign in · LaunchLightly</title>"));
-    assert!(html.contains("<h1>Sign in to LaunchLightly</h1>"));
+    assert!(html.contains("Sign in to LaunchLightly</h1>"));
     assert!(html.contains("id=\"sign-in-form\""));
     assert!(html.contains("autocomplete=\"email\""));
     assert!(html.contains("autocomplete=\"current-password\""));
@@ -74,7 +133,7 @@ async fn sign_up_page_exposes_the_supported_registration_fields() {
     let (status, html) = get_html(&app, "/sign-up").await;
 
     assert_eq!(status, StatusCode::OK);
-    assert!(html.contains("<h1>Create your account</h1>"));
+    assert!(html.contains("Create your account</h1>"));
     assert!(html.contains("id=\"sign-up-form\""));
     assert!(html.contains("autocomplete=\"name\""));
     assert!(html.contains("autocomplete=\"new-password\""));
@@ -95,7 +154,7 @@ async fn security_page_exposes_session_and_password_controls() {
 
     assert_eq!(status, StatusCode::OK);
     assert!(html.contains("<title>Account security · LaunchLightly</title>"));
-    assert!(html.contains("<h1>Account security</h1>"));
+    assert!(html.contains("Account security</h1>"));
     assert!(html.contains("id=\"change-password-form\""));
     assert!(html.contains("id=\"account-username\""));
     assert!(html.contains("autocomplete=\"username\""));
@@ -104,6 +163,10 @@ async fn security_page_exposes_session_and_password_controls() {
     assert!(html.contains("id=\"sign-out\""));
     assert!(html.contains("id=\"sign-out-status\""));
     assert!(html.contains("sign out every other session"));
+    assert!(html.contains("some symbols count as more than one"));
+    assert!(html.contains("role=\"status\""));
+    assert!(html.contains("type=\"checkbox\""));
+    assert!(html.contains("<svg"));
 }
 
 #[tokio::test]
@@ -268,6 +331,60 @@ async fn plain_http_is_rejected_outside_loopback_development() {
         Err(error) => error,
     };
     assert!(error.to_string().contains("HTTPS"));
+}
+
+#[tokio::test]
+async fn loopback_host_aliases_are_trusted_for_browser_auth_requests() {
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://unused:unused@localhost/unused")
+        .expect("lazy pool");
+    let app = router(
+        pool,
+        WebConfig {
+            secret: "test-secret-key-that-is-at-least-32-characters-long".to_owned(),
+            public_url: "http://127.0.0.1:3000".to_owned(),
+        },
+    )
+    .await
+    .expect("build router");
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/sign-out")
+        .header("content-type", "application/json")
+        .header("origin", "http://localhost:3000")
+        .header("host", "localhost:3000")
+        .body(Body::from("{}"))
+        .expect("browser auth request");
+
+    let response = app.handle(request).await;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn cross_site_auth_requests_remain_blocked() {
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://unused:unused@localhost/unused")
+        .expect("lazy pool");
+    let app = router(
+        pool,
+        WebConfig {
+            secret: "test-secret-key-that-is-at-least-32-characters-long".to_owned(),
+            public_url: "http://127.0.0.1:3000".to_owned(),
+        },
+    )
+    .await
+    .expect("build router");
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/sign-out")
+        .header("content-type", "application/json")
+        .header("origin", "https://attacker.example")
+        .header("host", "127.0.0.1:3000")
+        .body(Body::from("{}"))
+        .expect("cross-site auth request");
+
+    assert_eq!(app.handle(request).await.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

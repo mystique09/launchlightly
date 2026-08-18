@@ -17,10 +17,20 @@ use better_auth::{
 };
 use launchlightly_infra_postgresql::PgPool;
 use thiserror::Error;
-use topcoat::router::{Methods, Path, Router, StatusCode, route, tower::TowerRoute};
+use topcoat::{
+    asset::{AssetBundle, RouterBuilderAssetExt},
+    router::{
+        Methods, Path, Router, RouterBuilderDiscoverExt, StatusCode, route, tower::TowerRoute,
+    },
+};
 use url::{Host, Url};
 
-mod auth_ui;
+mod assets;
+mod components;
+mod layouts;
+mod pages;
+#[cfg(test)]
+mod tests;
 
 const MAX_PASSWORD_BYTES: usize = 128;
 const MAX_AUTH_REQUEST_BYTES: usize = 16 * 1024;
@@ -39,6 +49,9 @@ pub enum Error {
 
     #[error("could not construct Better Auth: {0}")]
     Build(#[source] better_auth::AuthError),
+
+    #[error("could not load Topcoat asset bundle: {0}")]
+    Assets(#[source] std::io::Error),
 }
 
 #[route(GET "/health")]
@@ -145,6 +158,15 @@ async fn list_sessions(
 }
 
 pub async fn router(pool: PgPool, config: WebConfig) -> Result<Router, Error> {
+    let assets = AssetBundle::load().map_err(Error::Assets)?;
+    router_with_assets(pool, config, assets).await
+}
+
+async fn router_with_assets(
+    pool: PgPool,
+    config: WebConfig,
+    assets: AssetBundle,
+) -> Result<Router, Error> {
     let public_url = Url::parse(config.public_url.trim()).map_err(|_| Error::InvalidPublicUrl)?;
     let is_loopback = match public_url.host() {
         Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
@@ -163,36 +185,44 @@ pub async fn router(pool: PgPool, config: WebConfig) -> Result<Router, Error> {
     }
     let base_url = format!("{}/api/auth", public_url.origin().ascii_serialization());
     let adapter: SqlxAdapter = SqlxAdapter::from_pool(pool);
+    let mut auth_config = AuthConfig::new(config.secret)
+        .base_url(base_url)
+        .base_path("/api/auth")
+        .password_min_length(8)
+        .disabled_path("/sign-in/username")
+        .disabled_path("/get-session")
+        .disabled_path("/list-sessions")
+        .disabled_path("/update-user")
+        .disabled_path("/change-email")
+        .disabled_path("/delete-user")
+        .disabled_path("/delete-user/callback")
+        .disabled_path("/forget-password")
+        .disabled_path("/reset-password")
+        .disabled_path("/reset-password/{token}")
+        .disabled_path("/set-password");
+    if public_url.scheme() == "http" && is_loopback {
+        let port = public_url
+            .port()
+            .map(|port| format!(":{port}"))
+            .unwrap_or_default();
+        for host in ["localhost", "127.0.0.1", "[::1]"] {
+            auth_config = auth_config.trusted_origin(format!("http://{host}{port}"));
+        }
+    }
     let auth = Arc::new(
-        BetterAuth::<SqlxAdapter>::new(
-            AuthConfig::new(config.secret)
-                .base_url(base_url)
-                .base_path("/api/auth")
-                .password_min_length(8)
-                .disabled_path("/sign-in/username")
-                .disabled_path("/get-session")
-                .disabled_path("/list-sessions")
-                .disabled_path("/update-user")
-                .disabled_path("/change-email")
-                .disabled_path("/delete-user")
-                .disabled_path("/delete-user/callback")
-                .disabled_path("/forget-password")
-                .disabled_path("/reset-password")
-                .disabled_path("/reset-password/{token}")
-                .disabled_path("/set-password"),
-        )
-        .database(adapter)
-        .plugin(EmailPasswordPlugin::new().enable_signup(true))
-        .plugin(SessionManagementPlugin::new())
-        .plugin(PasswordManagementPlugin::new().require_current_password(true))
-        .plugin(
-            AdminPlugin::new()
-                .admin_role("super_admin")
-                .default_user_role("user"),
-        )
-        .build()
-        .await
-        .map_err(Error::Build)?,
+        BetterAuth::<SqlxAdapter>::new(auth_config)
+            .database(adapter)
+            .plugin(EmailPasswordPlugin::new().enable_signup(true))
+            .plugin(SessionManagementPlugin::new())
+            .plugin(PasswordManagementPlugin::new().require_current_password(true))
+            .plugin(
+                AdminPlugin::new()
+                    .admin_role("super_admin")
+                    .default_user_role("user"),
+            )
+            .build()
+            .await
+            .map_err(Error::Build)?,
     );
 
     let auth_child = axum::Router::new()
@@ -210,12 +240,8 @@ pub async fn router(pool: PgPool, config: WebConfig) -> Result<Router, Error> {
         .layer(axum::middleware::from_fn(enforce_change_password_limit));
 
     Ok(Router::builder()
-        .layout(auth_ui::app_layout)
-        .page(auth_ui::index_page)
-        .page(auth_ui::sign_in_page)
-        .page(auth_ui::sign_up_page)
-        .page(auth_ui::security_page)
-        .route(health)
+        .assets(assets)
+        .discover()
         .route(TowerRoute::new(
             Methods::Any,
             Path::new("/api/auth"),

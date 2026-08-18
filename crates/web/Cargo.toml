@@ -11,8 +11,11 @@ launchlightly-infra-postgresql = { path = "../infra-postgresql" }
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
-topcoat.workspace = true
+topcoat = { workspace = true, features = ["font-fontsource", "icon-iconify", "tailwind", "ui"] }
 url.workspace = true
+
+[build-dependencies]
+topcoat = { version = "0.6.0", default-features = false, features = ["icon-iconify", "tailwind"] }
 
 [dev-dependencies]
 tokio.workspace = true

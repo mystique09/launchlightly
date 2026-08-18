@@ -1,3 +1,4 @@
+// Progressive enhancement for the email/password and account security pages.
 (() => {
     "use strict";
 
@@ -59,7 +60,8 @@
 
     function showStatus(target, message, tone = "error", focus = tone === "error") {
         if (!target) return;
-        target.textContent = message;
+        const content = target.querySelector("[data-status-message]") || target;
+        content.textContent = message;
         target.dataset.tone = tone;
         target.hidden = false;
         if (focus) target.focus({ preventScroll: true });
@@ -67,7 +69,8 @@
 
     function clearStatus(target) {
         if (!target) return;
-        target.textContent = "";
+        const content = target.querySelector("[data-status-message]") || target;
+        content.textContent = "";
         target.hidden = true;
         delete target.dataset.tone;
     }
@@ -178,10 +181,10 @@
         const retry = document.querySelector("#session-gate-retry");
 
         api(gate.dataset.sessionEndpoint)
-            .then(() => window.location.replace("/account/security"))
+            .then(() => window.location.replace(gate.dataset.authenticatedDestination))
             .catch((error) => {
                 if (error instanceof AuthRequestError && error.status === 401) {
-                    window.location.replace("/sign-in");
+                    window.location.replace(gate.dataset.unauthenticatedDestination);
                     return;
                 }
                 status.textContent = "We could not check your session. Check your connection and try again.";
