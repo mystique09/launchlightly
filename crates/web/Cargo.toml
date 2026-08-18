@@ -1,0 +1,18 @@
+[package]
+name = "launchlightly-web"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum.workspace = true
+better-auth.workspace = true
+chrono.workspace = true
+launchlightly-infra-postgresql = { path = "../infra-postgresql" }
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+topcoat.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
